@@ -19,10 +19,7 @@ class DownloadApp:
 
         self.create_buttons()
 
-        # Establecer el icono de la aplicación
-        icon_path = "JLWeb.png"  # Ruta al archivo .ico
-        icon = PhotoImage(file=icon_path)
-        master.tk.call("wm", "iconphoto", master._w, icon)
+        
 
     def create_buttons(self):
         obtener_mp3 = Button(self.master, text="Descargar MP3", font="Arial 10", width=15,
@@ -135,7 +132,7 @@ class DownloadApp:
                                 threading.Thread(target=self.download, args=("mp3", calidad_seleccionada, nombre_archivo, download_path)).start()
 
                 download_button = Button(quality_window, text="Descargar", command=download_selected_quality)
-                download_button.pack(pady=8)  # Agregar espacio vertical antes del botón
+                download_button.pack(pady=8)  # Agrega espacio vertical antes del botón
                 download_button.pack()
             else:
                 messagebox.showinfo("No hay calidades disponibles", "No hay calidades de audio disponibles para descargar.")
