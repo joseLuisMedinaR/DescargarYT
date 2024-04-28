@@ -7,7 +7,7 @@ from tkinter import *
 def main(page: ft.Page):
     page.title = "Descargar Audios y Videos de YouTube"
     page.window_width = 500
-    page.window_height = 380
+    page.window_height = 450
     page.window_maximizable = False
     page.window_bgcolor = ft.colors.TRANSPARENT
     page.bgcolor = ft.colors.BLUE_500
