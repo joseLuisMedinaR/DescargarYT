@@ -1,8 +1,6 @@
 import flet as ft
 from pytube import YouTube
 import re
-from tkinter import messagebox, simpledialog, filedialog
-from tkinter import *
 
 def main(page: ft.Page):
     page.title = "Descargar Audios y Videos de YouTube"
@@ -11,6 +9,9 @@ def main(page: ft.Page):
     page.window_maximizable = False
     page.window_bgcolor = ft.colors.TRANSPARENT
     page.bgcolor = ft.colors.BLUE_500
+
+    file_picker = ft.FilePicker()
+    page.overlay.append(file_picker)
 
     def obtener_mp3(e):
         url = tb1.value
@@ -81,7 +82,7 @@ def main(page: ft.Page):
     def mostrar_snackbar(mensaje):        
         page.snack_bar = ft.SnackBar(ft.Text(mensaje))
         page.snack_bar.open = True
-        page.snack_bar.duration = 5000        
+        page.snack_bar.duration = 4000        
         page.update()
 
     t = ft.Text()
@@ -149,7 +150,7 @@ def main(page: ft.Page):
         try:
             page.snack_bar = ft.SnackBar(ft.Text(f"Estamos buscando las distintas calidades de descarga. Aguarde por favor ..."))
             page.snack_bar.open = True
-            page.snack_bar.duration = 15000
+            page.snack_bar.duration = 4000
             page.update()
             
             yt = YouTube(url)
@@ -205,7 +206,7 @@ def main(page: ft.Page):
     def download_video(url, format, quality, filename):
         page.snack_bar = ft.SnackBar(ft.Text(f"Abriendo explorador de archivos para que elijas dónde guardar la descarga."))
         page.snack_bar.open = True
-        page.snack_bar.duration = 20000
+        page.snack_bar.duration = 15000
         page.update()
         try:
             yt = YouTube(url)
@@ -219,9 +220,8 @@ def main(page: ft.Page):
             nombre_archivo = filename
             
             if nombre_archivo:                
-                download_path = filedialog.askdirectory()
-                if download_path:
-                    download_thread(url, format, ext, nombre_archivo, download_path, quality)
+                file_picker.on_result = lambda e: download_thread(url, format, ext, nombre_archivo, file_picker.result.path, quality)
+                file_picker.get_directory_path()
         except Exception as e:
             mostrar_snackbar(str(e))
 
@@ -257,7 +257,8 @@ def main(page: ft.Page):
 
     def validate_url(url):        
         url_pattern = re.compile(
-            r"^(?:https?://)?(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)[\w-]{11}$",
+            #r"^(?:https?://)?(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)[\w-]{11}$",
+            r"^(?:https?://)?(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)[\w-]+",
             re.IGNORECASE,
         )
         return re.match(url_pattern, url) is not None
