@@ -122,7 +122,7 @@ def main(page: ft.Page):
             [
                 ft.FilledButton(
                     text="Cómo descargo ?",
-                    icon="HELP_ROUNDED",
+                    icon="HELP_ROUNDED",                    
                     width=200,
                     tooltip="Ayuda explicativa",
                     on_click=open_dlg_modal_help,
