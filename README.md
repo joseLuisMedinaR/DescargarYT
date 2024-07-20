@@ -1,5 +1,7 @@
 # Descargar mp3 o mp4 de yt
-![Imagen de la app](assets/pantallaDescargarYT.png)
+![Imagen de la app](assets/pantallaDescargarYT01.png)
+![Imagen de la app](assets/pantallaDescargarYT02.png)
+![Imagen de la app](assets/pantallaDescargarYT03.png)
 
 * Objetivo
 * Herramientas
