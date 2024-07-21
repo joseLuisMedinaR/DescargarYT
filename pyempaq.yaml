@@ -1,0 +1,9 @@
+name:
+  "Descargar MP3 y MP4 - By Joselu - 2024"
+exec:
+  script:
+    main.py
+dependencies:
+  - flet==0.23.2
+  - pillow==10.4.0
+  - yt-dlp==2024.7.16

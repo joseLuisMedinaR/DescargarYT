@@ -5,8 +5,8 @@
 
 * Objetivo
 * Herramientas
-* Conclusión
 * Instalación
+* Conclusión
 
 ---
 ## Objetivo
