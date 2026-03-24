@@ -1,315 +1,510 @@
-import flet as ft
-import re
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
 import yt_dlp
-import asyncio
 import threading
+import re
+import os
+import sys
+import subprocess
+import platform
 
-# Función principal de la aplicación
-def main(page: ft.Page):
-    # Configuración inicial de la ventana
-    page.title = "Descargar MP3 y MP4"
-    page.window.width = 500
-    page.window.height = 500
-    page.window.maximizable = False
-    page.window.bgcolor = ft.colors.TRANSPARENT
-    page.bgcolor = ft.colors.BLUE_500
+# ---------------------------
+# Ruta de recursos (para PyInstaller)
+# ---------------------------
 
-    selected_folder = ft.Text()
+def resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
 
-    # Función que se ejecuta cuando se selecciona una carpeta de descarga
-    def on_folder_result(e: ft.FilePickerResultEvent):
-        if e.path:
-            selected_folder.value = e.path
-            tb2.value = e.path  # Actualizar tb2 con la ruta seleccionada
-            page.update()
+    return os.path.join(base_path, relative_path)
 
-    file_picker = ft.FilePicker(on_result=on_folder_result)
-    page.overlay.append(file_picker)
+# ---------------------------
+# Configuración yt-dlp
+# ---------------------------
 
-    # Función asincrónica para mostrar un mensaje temporal (snackbar)
-    async def mostrar_snackbar(mensaje, duration=6000):
-        snackbar = ft.SnackBar(ft.Text(mensaje), duration=duration)
-        page.overlay.append(snackbar)
-        snackbar.open = True
-        page.update()
-        await asyncio.sleep(duration / 1000)
-        snackbar.open = False
-        page.update()
+YDL_BASE = {
+    "js_runtimes": {"node": {}},
+    "remote_components": ["ejs:github"]
+}
 
-    # Función para ejecutar corutinas de forma asincrónica
-    def run_async(coro):
-        try:
-            loop = asyncio.get_running_loop()
-        except RuntimeError:
-            loop = None
+# ---------------------------
+# Ventana principal
+# ---------------------------
+
+root = tk.Tk()
+root.title("Descargar MP3 y MP4")
+root.geometry("500x640")
+root.resizable(False, False)
+root.configure(bg="#f0f0f0")  # Fondo más claro y moderno
+
+# Estilo para ttk
+style = ttk.Style()
+style.theme_use('clam')
+
+# Configuración de estilos personalizados
+style.configure("TProgressbar", 
+                thickness=25, 
+                troughcolor='#E0E0E0', 
+                background='#4CAF50', 
+                bordercolor='#f0f0f0', 
+                lightcolor='#4CAF50', 
+                darkcolor='#4CAF50')
+
+style.configure("Custom.TButton", 
+                padding=10, 
+                font=("Arial", 10, "bold"))
+
+style.configure("Action.TButton", 
+                background="#2196F3", 
+                foreground="white", 
+                font=("Arial", 10, "bold"))
+
+style.map("Action.TButton",
+          background=[('active', '#1976D2')])
+
+# icono
+icon_path = resource_path("assets/icon.png")
+try:
+    root.iconphoto(True, tk.PhotoImage(file=icon_path))
+except:
+    pass
+
+selected_folder = ""
+last_downloaded_file = ""
+
+# ---------------------------
+# Abrir archivos/carpetas
+# ---------------------------
+
+def open_path(path):
+    if not path or not os.path.exists(path):
+        messagebox.showerror("Error", "No se encontró el archivo o carpeta")
+        return
         
-        if loop and loop.is_running():
-            asyncio.create_task(coro)
-        else:
-            asyncio.run(coro)
+    try:
+        if platform.system() == "Windows":
+            os.startfile(path)
+        elif platform.system() == "Darwin":  # macOS
+            subprocess.run(["open", path])
+        else:  # Linux
+            subprocess.run(["xdg-open", path])
+    except Exception as e:
+        messagebox.showerror("Error", f"No se pudo abrir: {str(e)}")
 
-    # Función para iniciar la descarga de un archivo MP3
-    def obtener_mp3(e):
-        url = tb1.value
-        if not url:
-            run_async(mostrar_snackbar("Ingrese una URL para poder descargar el audio."))
+def abrir_carpeta_descarga():
+    if selected_folder:
+        open_path(selected_folder)
+
+def abrir_archivo_descargado():
+    if last_downloaded_file:
+        open_path(last_downloaded_file)
+
+# ---------------------------
+# Progress Hook
+# ---------------------------
+
+def progress_hook(d):
+    if d['status'] == 'downloading':
+        try:
+            p_raw = d.get('_percent_str', '0%').strip()
+            # Limpiar caracteres de control ANSI que a veces añade yt-dlp
+            p_clean = re.sub(r'\x1b\[[0-9;]*m', '', p_raw).replace('%', '')
+            val = float(p_clean)
+            
+            root.after(0, lambda v=val: progress_bar.config(value=v))
+            
+            speed = d.get('_speed_str', 'N/A')
+            eta = d.get('_eta_str', 'N/A')
+            status_text = f"Descargando: {val:.1f}% | {speed} | ETA: {eta}"
+            root.after(0, lambda t=status_text: label_status.config(text=t, fg="#2E7D32"))
+            root.update_idletasks() # Forzar actualización de la UI
+        except Exception as e:
+            print(f"Error en progress_hook: {e}")
+            pass
+    elif d['status'] == 'finished':
+        root.after(0, lambda: progress_bar.config(value=100))
+        root.after(0, lambda: label_status.config(text="Procesando archivo... Espere por favor", fg="#1976D2"))
+        root.update_idletasks()
+
+# ---------------------------
+# Sanitizar nombre
+# ---------------------------
+
+def sanitize_filename(filename):
+    return re.sub(r'[<>:"/\\|?*\[\]]+', '', filename)
+
+# ---------------------------
+# Seleccionar carpeta
+# ---------------------------
+
+def seleccionar_carpeta():
+    global selected_folder
+
+    folder = filedialog.askdirectory()
+
+    if folder:
+        selected_folder = folder
+        tb2.config(state="normal")
+        tb2.delete(0, tk.END)
+        tb2.insert(0, folder)
+        tb2.config(state="readonly")
+
+# ---------------------------
+# Obtener nombre del video
+# ---------------------------
+
+def obtener_nombre(url):
+    try:
+
+        ydl_opts = {
+            **YDL_BASE,
+            "quiet": True,
+            "skip_download": True
+        }
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+
+        return sanitize_filename(info["title"])
+
+    except Exception as e:
+        root.after(0, lambda err=e: messagebox.showerror("Error", str(err)))
+        return None
+
+# ---------------------------
+# Descargar MP3
+# ---------------------------
+
+def descargar_mp3():
+
+    url = tb1.get().strip()
+
+    if not url:
+        messagebox.showwarning("Aviso", "Ingrese una URL")
+        return
+
+    if not selected_folder:
+        messagebox.showwarning("Aviso", "Seleccione una carpeta de descarga")
+        return
+
+    threading.Thread(target=descargar_mp3_thread, args=(url,), daemon=True).start()
+
+
+def descargar_mp3_thread(url):
+    global last_downloaded_file
+
+    try:
+        bitrate = combo_audio_quality.get()
+        title = obtener_nombre(url)
+
+        if not title:
             return
-        #elif not validate_url(url):
-        #    run_async(mostrar_snackbar("La URL ingresada no es válida."))
-        #    return
-        if not selected_folder.value:
-            run_async(mostrar_snackbar("Seleccione una carpeta de descarga."))
+
+        root.after(0, lambda: actualizar_nombre(f"{title}.mp3"))
+        root.after(0, lambda: progress_bar.config(value=0))
+        root.after(0, lambda: btn_open_folder.config(state="disabled"))
+        root.after(0, lambda: btn_open_file.config(state="disabled"))
+
+        salida = os.path.join(selected_folder, f"{title}.%(ext)s")
+
+        ydl_opts = {
+            **YDL_BASE,
+            "format": "bestaudio/best",
+            "outtmpl": salida,
+            "progress_hooks": [progress_hook],
+            "postprocessors": [{
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": "mp3",
+                "preferredquality": bitrate
+            }]
+        }
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+
+        last_downloaded_file = os.path.join(selected_folder, f"{title}.mp3")
+        root.after(0, lambda: label_status.config(text="Completado!"))
+        root.after(0, lambda: btn_open_folder.config(state="normal"))
+        root.after(0, lambda: btn_open_file.config(state="normal"))
+        root.after(0, lambda: messagebox.showinfo("OK", f"Descarga MP3 ({bitrate}k) finalizada"))
+
+    except Exception as e:
+        root.after(0, lambda err=e: messagebox.showerror("Error", str(err)))
+
+# ---------------------------
+# Descargar MP4
+# ---------------------------
+
+def descargar_mp4():
+
+    url = tb1.get().strip()
+
+    if not url:
+        messagebox.showwarning("Aviso", "Ingrese una URL")
+        return
+
+    if not selected_folder:
+        messagebox.showwarning("Aviso", "Seleccione una carpeta de descarga")
+        return
+
+    threading.Thread(target=descargar_mp4_thread, args=(url,), daemon=True).start()
+
+
+def descargar_mp4_thread(url):
+    global last_downloaded_file
+
+    try:
+        height = combo_video_quality.get().replace("p", "")
+        title = obtener_nombre(url)
+
+        if not title:
             return
-        threading.Thread(target=lambda: run_async(descargar_mp3(url))).start()
 
-    # Función para iniciar la descarga de un archivo MP4
-    def obtener_mp4(e):
-        url = tb1.value
-        if not url:
-            run_async(mostrar_snackbar("Ingrese una URL para poder descargar el video."))
-            return
-        #elif not validate_url(url):
-        #    run_async(mostrar_snackbar("La URL ingresada no es válida."))
-        #    return
-        if not selected_folder.value:
-            run_async(mostrar_snackbar("Seleccione una carpeta de descarga."))
-            return
-        threading.Thread(target=lambda: run_async(descargar_mp4(url))).start()
+        root.after(0, lambda: actualizar_nombre(f"{title}.mp4"))
+        root.after(0, lambda: progress_bar.config(value=0))
+        root.after(0, lambda: btn_open_folder.config(state="disabled"))
+        root.after(0, lambda: btn_open_file.config(state="disabled"))
 
-    # Función para cerrar el diálogo de ayuda
-    def close_dlg_help(e):
-        dlg_modal_help.open = False
-        page.update()
+        salida = os.path.join(selected_folder, f"{title}.%(ext)s")
 
-    # Diálogo modal de ayuda
-    dlg_modal_help = ft.AlertDialog(
-        modal=True,
-        title=ft.Text("Cómo descargo ?"),
-        content=ft.Text(
-            """1 - Hacer clic derecho en el video que estás reproduciendo.
-2- Hacer clic en COPIAR URL, y finalmente pegarlo en el cuadro de arriba que dice Enlace.
-(Para pegarlo presionar las teclas CTRL + V o clic con el botón derecho sobre el cuadro de texto y elegir pegar.)
-3- Presionar el botón que dice Seleccionar la Carpeta de Descarga y elegir la ruta para guardar el archivo.
-4- Elegir Descargar MP3 o Descargar MP4 según lo que se quiera hacer.
+        # Formato mejorado para asegurar audio y video
+        # 'bv*[height<=?height]+ba/b[height<=?height] / bv*+ba/b'
+        format_str = f"bestvideo[height<={height}][ext=mp4]+bestaudio[ext=m4a]/best[height<={height}][ext=mp4]/best[ext=mp4]/best"
 
-IMPORTANTE: No cerrar el programa hasta ver el archivo en la carpeta seleccionada.
+        ydl_opts = {
+            **YDL_BASE,
+            "format": format_str,
+            "outtmpl": salida,
+            "merge_output_format": "mp4",
+            "progress_hooks": [progress_hook],
+        }
+
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+
+        last_downloaded_file = os.path.join(selected_folder, f"{title}.mp4")
+        root.after(0, lambda: label_status.config(text="Completado!"))
+        root.after(0, lambda: btn_open_folder.config(state="normal"))
+        root.after(0, lambda: btn_open_file.config(state="normal"))
+        root.after(0, lambda: messagebox.showinfo("OK", f"Descarga MP4 ({height}p) finalizada"))
+
+    except Exception as e:
+        root.after(0, lambda err=e: messagebox.showerror("Error", str(err)))
+
+# ---------------------------
+# Actualizar nombre
+# ---------------------------
+
+def actualizar_nombre(nombre):
+    tb3.config(state="normal")
+    tb3.delete(0, tk.END)
+    tb3.insert(0, nombre)
+    tb3.config(state="readonly")
+
+# ---------------------------
+# Ayuda
+# ---------------------------
+
+def mostrar_ayuda():
+
+    texto = """1 - Hacer clic derecho en el video.
+2 - Copiar URL del video.
+
+3 - Pegar la URL en el campo ENLACE DEL VIDEO.
+
+4 - Seleccionar la carpeta donde se guardará el archivo.
+
+5 - Elegir la calidad deseada para video o audio.
+
+6 - Elegir Descargar MP3 o Descargar MP4.
+
+IMPORTANTE:
+No cerrar el programa hasta finalizar la descarga.
+La barra de progreso te indicará el estado actual.
 """
-        ),
-        actions=[
-            ft.TextButton("Cerrar Ayuda", on_click=close_dlg_help),
-        ],
-        actions_alignment=ft.MainAxisAlignment.END,
-    )
 
-    # Función asincrónica para abrir el diálogo de ayuda
-    async def open_dlg_modal_help(e):
-        page.overlay.append(dlg_modal_help)
-        dlg_modal_help.open = True
-        page.update()
+    messagebox.showinfo("Cómo descargar", texto)
 
-    # Función para cerrar la aplicación
-    def close(e):
-        page.window.close()
+# ---------------------------
+# Labels + Campos
+# ---------------------------
 
-    # Función para cerrar el diálogo de confirmación de cierre
-    def close_dlg(e):
-        dlg_modal.open = False
-        page.update()
+label1 = tk.Label(root, text="Enlace del Video", bg="#f0f0f0", fg="#333333", font=("Arial", 11, "bold"))
+label1.pack(pady=(20,0))
 
-    # Diálogo modal de confirmación de cierre
-    dlg_modal = ft.AlertDialog(
-        modal=True,
-        title=ft.Text("Confirme por favor"),
-        content=ft.Text("Realmente desea salir de la aplicación ?"),
-        actions=[
-            ft.TextButton("Si", on_click=close),
-            ft.TextButton("No", on_click=close_dlg),
-        ],
-        actions_alignment=ft.MainAxisAlignment.END,
-    )
+tb1 = tk.Entry(root, width=55, font=("Arial", 10), bd=2, relief="flat")
+tb1.pack(pady=5, ipady=3)
 
-    # Función para abrir el diálogo de confirmación de cierre
-    def open_dlg_modal_close(e):
-        page.overlay.append(dlg_modal)
-        dlg_modal.open = True
-        page.update()
+label2 = tk.Label(root, text="Carpeta de Descarga", bg="#f0f0f0", fg="#333333", font=("Arial", 11, "bold"))
+label2.pack(pady=(15,0))
 
-    # Campo de texto para la URL
-    tb1 = ft.TextField(label="Enlace", hint_text="Pegar el enlace aquí")
-    page.add(tb1)
+# Frame para carpeta y botón de selección
+frame_folder = tk.Frame(root, bg="#f0f0f0")
+frame_folder.pack(pady=5)
 
-    # Campo de texto para la ruta de descarga, solo lectura
-    tb2 = ft.TextField(label="Ruta de Descarga", hint_text="Ruta de Descarga", read_only=True)
-    page.add(tb2)
+tb2 = tk.Entry(frame_folder, width=40, state="readonly", font=("Arial", 9), bd=2, relief="flat")
+tb2.grid(row=0, column=0, padx=(0, 5), ipady=3)
 
-    # Campo para saber el nombre del archivo
-    tb3 = ft.TextField(label="Nombre de Archivo", hint_text=".................", read_only=True)
-    page.add(tb3)
+btn_folder = tk.Button(
+    frame_folder,
+    text="📁 Explorar",
+    command=seleccionar_carpeta,
+    bg="#607D8B",
+    fg="white",
+    font=("Arial", 9, "bold"),
+    bd=0,
+    padx=10,
+    cursor="hand2"
+)
+btn_folder.grid(row=0, column=1)
 
-    # Botón para seleccionar la carpeta de descarga
-    page.add(
-        ft.Row(
-            [
-                ft.FilledButton(
-                    text="Seleccionar la Carpeta de Descarga",
-                    icon="FOLDER_OPEN",
-                    width=200,
-                    tooltip="Seleccionar la Carpeta de Descarga",
-                    on_click=lambda _: file_picker.get_directory_path(),
-                ),
-            ],
-            alignment=ft.MainAxisAlignment.CENTER,
-        )
-    )
+label3 = tk.Label(root, text="Nombre del Archivo", bg="#f0f0f0", fg="#333333", font=("Arial", 11, "bold"))
+label3.pack(pady=(15,0))
 
-    # Botón para descargar MP3
-    page.add(
-        ft.Row(
-            [
-                ft.FilledButton(
-                    text="Descargar MP3",
-                    icon="QUEUE_MUSIC_SHARP",
-                    width=200,
-                    tooltip="Descargar música",
-                    on_click=obtener_mp3,
-                ),
-            ],
-            alignment=ft.MainAxisAlignment.CENTER,
-        )
-    )
+tb3 = tk.Entry(root, width=55, state="readonly", font=("Arial", 9), bd=2, relief="flat")
+tb3.pack(pady=5, ipady=3)
 
-    # Botón para descargar MP4
-    page.add(
-        ft.Row(
-            [
-                ft.FilledButton(
-                    text="Descargar MP4",
-                    icon="MUSIC_VIDEO",
-                    width=200,
-                    tooltip="Descargar Video",
-                    on_click=obtener_mp4,
-                ),
-            ],
-            alignment=ft.MainAxisAlignment.CENTER,
-        )
-    )
+# ---------------------------
+# Selección de Calidad
+# ---------------------------
 
-    # Botón para mostrar el diálogo de ayuda
-    page.add(
-        ft.Row(
-            [
-                ft.FilledButton(
-                    text="Cómo descargo ?",
-                    icon="HELP_ROUNDED",
-                    width=200,
-                    tooltip="Ayuda explicativa",
-                    on_click=open_dlg_modal_help,
-                ),
-            ],
-            alignment=ft.MainAxisAlignment.CENTER,
-        )
-    )
+frame_quality = tk.LabelFrame(root, text=" Opciones de Calidad ", bg="#f0f0f0", fg="#333333", font=("Arial", 10, "bold"), padx=10, pady=10)
+frame_quality.pack(pady=15, padx=20, fill="x")
 
-    # Botón para cerrar la aplicación
-    page.add(
-        ft.Row(
-            [
-                ft.ElevatedButton(
-                    text="Cerrar",
-                    icon="EXIT_TO_APP",
-                    width=200,
-                    tooltip="Cerrar aplicación",
-                    on_click=open_dlg_modal_close,
-                ),
-            ],
-            alignment=ft.MainAxisAlignment.CENTER,
-        )
-    )
+# Calidad Video
+label_video_q = tk.Label(frame_quality, text="🎬 Video (MP4):", bg="#f0f0f0", fg="#555555", font=("Arial", 9, "bold"))
+label_video_q.grid(row=0, column=0, padx=5, sticky="w")
 
-    # Clase para manejar los mensajes de log de yt-dlp
-    class MyLogger:
-        def debug(self, msg):
-            if msg.startswith('[debug] '):
-                pass
-            else:
-                self.info(msg)
+combo_video_quality = ttk.Combobox(frame_quality, values=["1080p", "720p", "480p", "360p"], width=15, state="readonly")
+combo_video_quality.set("720p")
+combo_video_quality.grid(row=0, column=1, padx=20, pady=5)
 
-        def info(self, msg):
-            run_async(mostrar_snackbar(msg))
+# Calidad Audio
+label_audio_q = tk.Label(frame_quality, text="🎵 Audio (MP3):", bg="#f0f0f0", fg="#555555", font=("Arial", 9, "bold"))
+label_audio_q.grid(row=1, column=0, padx=5, sticky="w")
 
-        def warning(self, msg):
-            run_async(mostrar_snackbar(f"Advertencia: {msg}"))
+combo_audio_quality = ttk.Combobox(frame_quality, values=["320", "256", "192", "128"], width=15, state="readonly")
+combo_audio_quality.set("192")
+combo_audio_quality.grid(row=1, column=1, padx=20, pady=5)
 
-        def error(self, msg):
-            run_async(mostrar_snackbar(f"Error: {msg}"))
+# ---------------------------
+# Progreso
+# ---------------------------
 
-    # Función para manejar el progreso de la descarga
-    async def my_hook(d):
-        if d['status'] == 'finished':
-            await mostrar_snackbar('Descarga completada, procesando ...', duration=2000)
-            await mostrar_snackbar('Descarga Finalizada')
-        elif d['status'] == 'downloading':
-            progress = d.get('_percent_str', '0%')
-            await mostrar_snackbar(f"Progreso: {progress}")
+label_status = tk.Label(root, text="Listo para descargar", bg="#f0f0f0", fg="#666666", font=("Arial", 9, "italic"))
+label_status.pack(pady=(10,0))
 
-    # Función para sanitizar el nombre de los archivos
-    def sanitize_filename(filename):
-        return re.sub(r'[<>:"/\\|?*\[\]]+', '', filename)
+progress_bar = ttk.Progressbar(root, orient="horizontal", length=420, mode="determinate", style="TProgressbar")
+progress_bar.pack(pady=(5, 10))
 
-    # Función asincrónica para descargar MP3
-    async def descargar_mp3(url):
-        try:
-            await mostrar_snackbar("Descarga en proceso, espere un momento por favor ...")
-            ydl_opts = {
-                'format': 'm4a/bestaudio/best',
-                'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3'}],
-                'outtmpl': f'{selected_folder.value}/%(title)s.%(ext)s',
-                'logger': MyLogger(),
-                'progress_hooks': [lambda d: run_async(my_hook(d))],
-            }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info_dict = ydl.extract_info(url, download=False)
-                title = sanitize_filename(info_dict['title'])
-                ydl_opts['outtmpl'] = f'{selected_folder.value}/{title}.%(ext)s'
-                # Mostramos el nombre del archivo a descargar
-                tb3.value = f'{title}.mp3'  # Actualizar tb3 con el nombre del archivo
-                page.update()
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([url])
-            await mostrar_snackbar("Se completó el proceso de descarga.")
-        except Exception as e:
-            await mostrar_snackbar(str(e))
+# ---------------------------
+# Botones Post-Descarga
+# ---------------------------
 
-    # Función asincrónica para descargar MP4
-    async def descargar_mp4(url):
-        try:
-            await mostrar_snackbar("Descarga en proceso, espere un momento por favor ...")
-            ydl_opts = {
-                'format': "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4] / bv*+ba/b",
-                'outtmpl': f'{selected_folder.value}/%(title)s.%(ext)s',
-                'logger': MyLogger(),
-                'progress_hooks': [lambda d: run_async(my_hook(d))],
-            }
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info_dict = ydl.extract_info(url, download=False)
-                title = sanitize_filename(info_dict['title'])
-                ydl_opts['outtmpl'] = f'{selected_folder.value}/{title}.%(ext)s'
-                # Mostramos el nombre del archivo a descargar
-                tb3.value = f'{title}.mp4'  # Actualizar tb3 con el nombre del archivo
-                page.update()
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([url])
-            await mostrar_snackbar("Se completó el proceso de descarga.")
-        except Exception as e:
-            await mostrar_snackbar(str(e))
+frame_post_download = tk.Frame(root, bg="#f0f0f0")
+frame_post_download.pack(pady=5)
 
-    # No vamos a controlar que sea una dirección de YouTube ya que se puede descargar cualquier video de internet
-    #def validate_url(url):
-    #    url_pattern = re.compile(
-    #        r"^(?:https?://)?(?:www\.)?(?:youtube\.com/watch\?v=|youtu\.be/)[\w-]+",
-    #        re.IGNORECASE,
-    #    )
-    #    return re.match(url_pattern, url) is not None
+btn_open_folder = tk.Button(
+    frame_post_download,
+    text="📂 Abrir Carpeta",
+    command=abrir_carpeta_descarga,
+    bg="#8BC34A",
+    fg="white",
+    font=("Arial", 9, "bold"),
+    bd=0,
+    padx=10,
+    pady=5,
+    state="disabled",
+    cursor="hand2"
+)
+btn_open_folder.grid(row=0, column=0, padx=10)
 
-# Iniciamos la aplicación
-ft.app(target=main)
+btn_open_file = tk.Button(
+    frame_post_download,
+    text="📄 Abrir Archivo",
+    command=abrir_archivo_descargado,
+    bg="#CDDC39",
+    fg="#333333",
+    font=("Arial", 9, "bold"),
+    bd=0,
+    padx=10,
+    pady=5,
+    state="disabled",
+    cursor="hand2"
+)
+btn_open_file.grid(row=0, column=1, padx=10)
+
+# ---------------------------
+# Botones de Acción
+# ---------------------------
+
+frame_actions = tk.Frame(root, bg="#f0f0f0")
+frame_actions.pack(pady=5)
+
+btn_mp3 = tk.Button(
+    frame_actions,
+    text="🎵 Descargar MP3",
+    width=20,
+    command=descargar_mp3,
+    bg="#E91E63",
+    fg="white",
+    font=("Arial", 10, "bold"),
+    bd=0,
+    pady=8,
+    cursor="hand2"
+)
+btn_mp3.grid(row=0, column=0, padx=10)
+
+btn_mp4 = tk.Button(
+    frame_actions,
+    text="🎬 Descargar MP4",
+    width=20,
+    command=descargar_mp4,
+    bg="#2196F3",
+    fg="white",
+    font=("Arial", 10, "bold"),
+    bd=0,
+    pady=8,
+    cursor="hand2"
+)
+btn_mp4.grid(row=0, column=1, padx=10)
+
+# Botones secundarios
+frame_secondary = tk.Frame(root, bg="#f0f0f0")
+frame_secondary.pack(pady=20)
+
+btn_help = tk.Button(
+    frame_secondary,
+    text="❓ Ayuda",
+    width=15,
+    command=mostrar_ayuda,
+    bg="#9E9E9E",
+    fg="white",
+    font=("Arial", 9, "bold"),
+    bd=0,
+    pady=5,
+    cursor="hand2"
+)
+btn_help.grid(row=0, column=0, padx=10)
+
+btn_exit = tk.Button(
+    frame_secondary,
+    text="❌ Salir",
+    width=15,
+    command=root.destroy,
+    bg="#f44336",
+    fg="white",
+    font=("Arial", 9, "bold"),
+    bd=0,
+    pady=5,
+    cursor="hand2"
+)
+btn_exit.grid(row=0, column=1, padx=10)
+
+# ---------------------------
+# Ejecutar app
+# ---------------------------
+
+root.mainloop()

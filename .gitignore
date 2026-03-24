@@ -1,4 +1,8 @@
 descargarYoutube_V3.0.py
 descargarYoutube.py
 main_.py
+main__.py
 .descargaryt/
+dist/
+build/
+*.spec
